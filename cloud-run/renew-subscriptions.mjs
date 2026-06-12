@@ -12,6 +12,8 @@ const GOOGLE_CLIENT = JSON.parse(process.env.GOOGLE_CLIENT || "{}")
 const GOOGLE_TOKENS = JSON.parse(process.env.GOOGLE_TOKENS || "{}")
 const clientCfg = GOOGLE_CLIENT.installed || GOOGLE_CLIENT.web || GOOGLE_CLIENT
 
+const EVENTS_API = "https://workspaceevents.googleapis.com/v1"
+
 async function googleAccessToken() {
   const res = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
@@ -48,7 +50,7 @@ async function main() {
     payloadOptions: { includeResource: false },
     ttl: "604800s",
   }
-  const create = await fetch("https://workspaceevents.googleapis.com/v1/subscriptions", {
+  const create = await fetch(EVENTS_API + "/subscriptions", {
     method: "POST",
     headers: auth,
     body: JSON.stringify(subBody),
@@ -63,12 +65,12 @@ async function main() {
     const filter = encodeURIComponent(
       'event_types:"google.workspace.chat.message.v1.created" AND target_resource="//cloudidentity.googleapis.com/users/me"'
     )
-    const list = await fetch(`https://workspaceevents.googleapis.com/v1/subscriptions?filter=${filter}`, { headers: auth })
+    const list = await fetch(EVENTS_API + "/subscriptions?filter=" + filter, { headers: auth })
     if (!list.ok) throw new Error(`Listar subscriptions falhou: ${list.status} ${await list.text()}`)
     const subs = (await list.json()).subscriptions || []
     for (const s of subs) {
       const patch = await fetch(
-        `https://workspaceevents.googleapis.com/v1/${s.name}?updateMask=ttl`,
+        EVENTS_API + "/" + s.name + "?updateMask=ttl",
         { method: "PATCH", headers: auth, body: JSON.stringify({ ttl: "604800s" }) }
       )
       if (!patch.ok) throw new Error(`Renovar subscription falhou: ${patch.status} ${await patch.text()}`)

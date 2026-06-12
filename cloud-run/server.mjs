@@ -20,6 +20,10 @@ const GOOGLE_CLIENT = JSON.parse(process.env.GOOGLE_CLIENT || "{}")
 const GOOGLE_TOKENS = JSON.parse(process.env.GOOGLE_TOKENS || "{}")
 const clientCfg = GOOGLE_CLIENT.installed || GOOGLE_CLIENT.web || GOOGLE_CLIENT
 
+const NOTION_API = "https://api.notion.com/v1"
+const GMAIL_API = "https://gmail.googleapis.com/gmail/v1"
+const CHAT_API = "https://chat.googleapis.com/v1"
+
 // ---------- Google auth (renova access token com o refresh token) ----------
 let cachedToken = null
 let cachedTokenExp = 0
@@ -52,7 +56,7 @@ async function gfetch(url) {
 
 // ---------- Notion ----------
 async function notionFetch(path, body) {
-  const res = await fetch(`https://api.notion.com/v1${path}`, {
+  const res = await fetch(NOTION_API + path, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${NOTION_TOKEN}`,
@@ -67,7 +71,7 @@ async function notionFetch(path, body) {
 
 // Mesma deduplicacao dos syncs diarios: se o ID ja existe no DB, pula.
 async function alreadyInNotion(databaseId, property, value) {
-  const data = await notionFetch(`/databases/${databaseId}/query`, {
+  const data = await notionFetch("/databases/" + databaseId + "/query", {
     page_size: 1,
     filter: { property, rich_text: { equals: value } },
   })
@@ -92,13 +96,11 @@ function countAttachments(part) {
 // Listamos as mensagens recentes e deduplicamos pelo ID Gmail no Notion.
 // Assim nao dependemos de guardar historyId (Cloud Run pode reiniciar a qualquer momento).
 async function processGmail() {
-  const list = await gfetch(
-    "https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=20&q=newer_than:1d"
-  )
+  const list = await gfetch(GMAIL_API + "/users/me/messages?maxResults=20&q=newer_than:1d")
   let created = 0
   for (const m of list.messages || []) {
     if (await alreadyInNotion(GMAIL_DATABASE_ID, "ID Gmail", m.id)) continue
-    const msg = await gfetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${m.id}?format=full`)
+    const msg = await gfetch(GMAIL_API + "/users/me/messages/" + m.id + "?format=full")
     const headers = msg.payload?.headers || []
     const from = header(headers, "From")
     const direcao = from.toLowerCase().includes(OWNER_EMAIL) ? "Enviado" : "Recebido"
@@ -133,7 +135,7 @@ async function processChat(eventData) {
     return 0
   }
   if (await alreadyInNotion(CHAT_DATABASE_ID, "ID Mensagem", name)) return 0
-  const msg = await gfetch(`https://chat.googleapis.com/v1/${name}`)
+  const msg = await gfetch(CHAT_API + "/" + name)
   const text = msg.text || msg.formattedText || ""
   const temAnexo = Array.isArray(msg.attachment) && msg.attachment.length > 0
   const sender = msg.sender?.name || ""
@@ -141,7 +143,7 @@ async function processChat(eventData) {
   let espaco = "Mensagem direta"
   try {
     if (msg.space?.name) {
-      const space = await gfetch(`https://chat.googleapis.com/v1/${msg.space.name}`)
+      const space = await gfetch(CHAT_API + "/" + msg.space.name)
       espaco = space.displayName || "Mensagem direta"
     }
   } catch { /* DMs nao tem displayName - mantem o padrao */ }
