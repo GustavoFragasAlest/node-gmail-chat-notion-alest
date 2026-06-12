@@ -1,0 +1,82 @@
+# Workflow: executa o Bloco C inteiro (secrets -> Secret Manager, deploy Cloud Run,
+# assinaturas push e ativacao das inscricoes de tempo real).
+# Requer o secret GCP_SA_KEY (chave JSON da service account github-deployer).
+
+name: Deploy Tempo Real (Fase 2)
+
+on:
+  workflow_dispatch:
+
+env:
+  PROJECT: alest-internal-demo-gcp
+  REGION: us-central1
+  SERVICE: notion-realtime-sync
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: '${{ secrets.GCP_SA_KEY }}'
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Copiar secrets do GitHub para o Secret Manager
+        env:
+          NOTION_TOKEN: '${{ secrets.NOTION_TOKEN }}'
+          GMAIL_DATABASE_ID: '${{ secrets.GMAIL_DATABASE_ID }}'
+          CHAT_DATABASE_ID: '${{ secrets.CHAT_DATABASE_ID }}'
+          GOOGLE_CLIENT: '${{ secrets.GOOGLE_CLIENT }}'
+          GOOGLE_TOKENS: '${{ secrets.GOOGLE_TOKENS }}'
+        run: |
+          for s in NOTION_TOKEN GMAIL_DATABASE_ID CHAT_DATABASE_ID GOOGLE_CLIENT GOOGLE_TOKENS; do
+            gcloud secrets describe "$s" --project=$PROJECT >/dev/null 2>&1 \
+              || gcloud secrets create "$s" --replication-policy=automatic --project=$PROJECT
+            printf '%s' "${!s}" | gcloud secrets versions add "$s" --data-file=- --project=$PROJECT
+          done
+
+      - name: Dar acesso aos secrets para o runtime do Cloud Run
+        run: |
+          PROJECT_NUMBER=$(gcloud projects describe $PROJECT --format='value(projectNumber)')
+          for s in NOTION_TOKEN GMAIL_DATABASE_ID CHAT_DATABASE_ID GOOGLE_CLIENT GOOGLE_TOKENS; do
+            gcloud secrets add-iam-policy-binding "$s" \
+              --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
+              --role=roles/secretmanager.secretAccessor --project=$PROJECT
+          done
+
+      - name: Deploy do Cloud Run
+        run: |
+          gcloud run deploy $SERVICE \
+            --source cloud-run/ \
+            --region $REGION \
+            --project $PROJECT \
+            --no-allow-unauthenticated \
+            --set-secrets NOTION_TOKEN=NOTION_TOKEN:latest,GMAIL_DATABASE_ID=GMAIL_DATABASE_ID:latest,CHAT_DATABASE_ID=CHAT_DATABASE_ID:latest,GOOGLE_CLIENT=GOOGLE_CLIENT:latest,GOOGLE_TOKENS=GOOGLE_TOKENS:latest
+
+      - name: Criar assinaturas push (Pub/Sub -> Cloud Run)
+        run: |
+          PROJECT_NUMBER=$(gcloud projects describe $PROJECT --format='value(projectNumber)')
+          PUSH_SA="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
+          gcloud run services add-iam-policy-binding $SERVICE \
+            --region $REGION --project $PROJECT \
+            --member serviceAccount:$PUSH_SA --role roles/run.invoker
+          SERVICE_URL=$(gcloud run services describe $SERVICE --region $REGION --project $PROJECT --format 'value(status.url)')
+          gcloud pubsub subscriptions describe gmail-notify-push --project=$PROJECT >/dev/null 2>&1 \
+            || gcloud pubsub subscriptions create gmail-notify-push --topic gmail-notify --project $PROJECT \
+                 --push-endpoint "$SERVICE_URL/gmail" --push-auth-service-account $PUSH_SA
+          gcloud pubsub subscriptions describe chat-notify-push --project=$PROJECT >/dev/null 2>&1 \
+            || gcloud pubsub subscriptions create chat-notify-push --topic chat-notify --project $PROJECT \
+                 --push-endpoint "$SERVICE_URL/chat" --push-auth-service-account $PUSH_SA
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Ativar inscricoes (Gmail watch + Chat subscription)
+        env:
+          GOOGLE_CLIENT: '${{ secrets.GOOGLE_CLIENT }}'
+          GOOGLE_TOKENS: '${{ secrets.GOOGLE_TOKENS }}'
+        run: node cloud-run/renew-subscriptions.mjs
