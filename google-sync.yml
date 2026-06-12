@@ -1,0 +1,44 @@
+name: Gmail e Chat para Notion Sync
+
+on:
+  schedule:
+    - cron: "0 6 * * *" # 03:00 em Brasilia
+  workflow_dispatch:
+    inputs:
+      lookback_days:
+        description: "Quantos dias para tras buscar"
+        required: false
+        default: "2"
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Preparar credenciais
+        env:
+          GOOGLE_CLIENT: $ secrets.GOOGLE_CLIENT 
+          GOOGLE_TOKENS: $ secrets.GOOGLE_TOKENS 
+        run: |
+          printf '%s' "$GOOGLE_CLIENT" > google-client.json
+          printf '%s' "$GOOGLE_TOKENS" > google-tokens.json
+
+      - name: Sync Gmail
+        env:
+          NOTION_TOKEN: $ secrets.NOTION_TOKEN 
+          GMAIL_DATABASE_ID: $ secrets.GMAIL_DATABASE_ID 
+          LOOKBACK_DAYS: $ github.event.inputs.lookback_days || '2' 
+        run: node sync-gmail.mjs
+
+      - name: Sync Google Chat
+        if: $ !cancelled() 
+        env:
+          NOTION_TOKEN: $ secrets.NOTION_TOKEN 
+          CHAT_DATABASE_ID: $ secrets.CHAT_DATABASE_ID 
+          LOOKBACK_DAYS: $ github.event.inputs.lookback_days || '2' 
+        run: node sync-chat.mjs
