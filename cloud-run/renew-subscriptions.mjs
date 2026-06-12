@@ -6,6 +6,8 @@
 //
 // 1) Gmail: users.watch -> publica notificacoes no topico gmail-notify
 // 2) Chat: subscription do Workspace Events -> topico chat-notify
+//    Alvo: //chat.googleapis.com/spaces/- = TODOS os espacos em que o usuario
+//    e membro (docs: developers.google.com/workspace/events/guides/events-chat)
 
 const project = process.env.GCP_PROJECT || "alest-internal-demo-gcp"
 const GOOGLE_CLIENT = JSON.parse(process.env.GOOGLE_CLIENT || "{}")
@@ -13,6 +15,7 @@ const GOOGLE_TOKENS = JSON.parse(process.env.GOOGLE_TOKENS || "{}")
 const clientCfg = GOOGLE_CLIENT.installed || GOOGLE_CLIENT.web || GOOGLE_CLIENT
 
 const EVENTS_API = "https://workspaceevents.googleapis.com/v1"
+const CHAT_TARGET = "//chat.googleapis.com/spaces/-"
 
 async function googleAccessToken() {
   const res = await fetch("https://oauth2.googleapis.com/token", {
@@ -43,12 +46,13 @@ async function main() {
   console.log("Gmail watch OK:", JSON.stringify(await watch.json()))
 
   // ---- 2) Chat subscription (Workspace Events) ----
+  // ttl "0s" = usa o maximo permitido pela API para este tipo de assinatura
   const subBody = {
-    targetResource: "//cloudidentity.googleapis.com/users/me",
+    targetResource: CHAT_TARGET,
     eventTypes: ["google.workspace.chat.message.v1.created"],
     notificationEndpoint: { pubsubTopic: `projects/${project}/topics/chat-notify` },
     payloadOptions: { includeResource: false },
-    ttl: "604800s",
+    ttl: "0s",
   }
   const create = await fetch(EVENTS_API + "/subscriptions", {
     method: "POST",
@@ -63,7 +67,7 @@ async function main() {
   if (create.status === 409) {
     // Ja existe -> renova o TTL da subscription existente
     const filter = encodeURIComponent(
-      'event_types:"google.workspace.chat.message.v1.created" AND target_resource="//cloudidentity.googleapis.com/users/me"'
+      'event_types:"google.workspace.chat.message.v1.created" AND target_resource="' + CHAT_TARGET + '"'
     )
     const list = await fetch(EVENTS_API + "/subscriptions?filter=" + filter, { headers: auth })
     if (!list.ok) throw new Error(`Listar subscriptions falhou: ${list.status} ${await list.text()}`)
@@ -71,7 +75,7 @@ async function main() {
     for (const s of subs) {
       const patch = await fetch(
         EVENTS_API + "/" + s.name + "?updateMask=ttl",
-        { method: "PATCH", headers: auth, body: JSON.stringify({ ttl: "604800s" }) }
+        { method: "PATCH", headers: auth, body: JSON.stringify({ ttl: "0s" }) }
       )
       if (!patch.ok) throw new Error(`Renovar subscription falhou: ${patch.status} ${await patch.text()}`)
       console.log("Chat subscription renovada:", s.name)
