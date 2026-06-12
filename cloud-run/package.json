@@ -1,0 +1,13 @@
+{
+  "name": "notion-realtime-sync",
+  "version": "1.0.0",
+  "description": "Recebe push do Pub/Sub (Gmail + Google Chat) e grava no Notion em tempo real",
+  "type": "module",
+  "main": "server.mjs",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
