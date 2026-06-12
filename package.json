@@ -1,0 +1,13 @@
+{
+  "name": "node-gmail-chat-notion-alest",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "auth": "node auth.mjs",
+    "sync:gmail": "node sync-gmail.mjs",
+    "sync:chat": "node sync-chat.mjs",
+    "sync": "node sync-gmail.mjs && node sync-chat.mjs"
+  }
+}
